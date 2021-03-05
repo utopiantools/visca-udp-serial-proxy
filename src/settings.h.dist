@@ -1,7 +1,13 @@
+#include <WiFi.h>
+
 // WIFI SETTINGS
 const char *SSID = "SSID";
 const char *PASSWORD = "PWD";
 
+// UDP SETTINGS
+const int udp_port = 52381;
+
+// RS232 Serial Settings
 const int txpin = 19;
 const int rxpin = 22;
 
@@ -13,3 +19,7 @@ double ZOOMMULT = 0.3;
 double ZOOMEXP = 1.5;
 double PTZMULT = 0.3;
 double PTZEXP = 1.0;
+
+// TALLY SETTINGS
+const IPAddress VMIX_IP = IPAddress(192, 168, 10, 50);
+const int VMIX_PORT = 8099;
