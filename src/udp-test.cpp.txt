@@ -1,0 +1,71 @@
+/*|--------------------------------------------------------------------------------|*/
+/*|Author: MARTIN CHLEBOVEC                                                        |*/
+/*|Web: https://arduino.php5.sk/udp-control-esp32.php?lang=en                      |*/
+/*|Doska: ESP32 DevkitC v4 / ESP32 Devkit v1                                       |*/
+/*|--------------------------------------------------------------------------------|*/
+//Revision - updated: 16. August 2020
+#include <Arduino.h>
+#include <WiFi.h>
+#include <M5StickC.h>
+#include "AsyncUDP.h"
+const char *ssid = "MIKELS_2.4";
+const char *pass = "in the beginning was the word";
+const int led = 2; //D pin (Build-in LED for Devkit V1)
+AsyncUDP udp;
+
+void setup()
+{
+	Serial.begin(115200);
+	pinMode(led, OUTPUT);
+	WiFi.disconnect(true);
+	WiFi.mode(WIFI_STA);
+	WiFi.begin(ssid, pass);
+
+	while (WiFi.status() != WL_CONNECTED)
+	{
+		delay(500);
+		Serial.print(".");
+	}
+
+	if (udp.listen(4444))
+	{
+		Serial.print("UDP running at IP: ");
+		Serial.print(WiFi.localIP());
+		Serial.println(" port: 4444");
+		udp.onPacket([](AsyncUDPPacket packet) {
+			Serial.print("Type of UDP datagram: ");
+			Serial.print(packet.isBroadcast() ? "Broadcast" : packet.isMulticast() ? "Multicast"
+																				   : "Unicast");
+			Serial.print(", Sender: ");
+			Serial.print(packet.remoteIP());
+			Serial.print(":");
+			Serial.print(packet.remotePort());
+			Serial.print(", Receiver: ");
+			Serial.print(packet.localIP());
+			Serial.print(":");
+			Serial.print(packet.localPort());
+			Serial.print(", Message lenght: ");
+			Serial.print(packet.length());
+			Serial.print(", Payload: ");
+			Serial.write(packet.data(), packet.length());
+			Serial.println();
+			String myString = (const char *)packet.data();
+			if (myString.startsWith("ON"))
+			{
+				Serial.println("Action: Turning on relay");
+				digitalWrite(led, HIGH);
+			}
+			else if (myString.startsWith("OFF"))
+			{
+				Serial.println("Action: Turning off relay");
+				digitalWrite(led, LOW);
+			}
+			packet.printf("ESP32 received %u bytes of datas", packet.length()); //send what you received to sender via UDP
+		});
+	}
+}
+
+void loop()
+{
+	delay(1000); //if no delay, UDP message will not be loaded
+}
