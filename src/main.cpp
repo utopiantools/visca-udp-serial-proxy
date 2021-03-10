@@ -257,7 +257,7 @@ void update_tally()
     led(red);
     break;
   case 2:
-    led(blue);
+    led(green);
     break;
   }
 }
@@ -375,6 +375,7 @@ void loop()
   }
   else if (M5.Btn.pressedFor(750))
   {
+    start_tally();
     Serial.println("long press button!");
     // find the next active tally by cycling through all the inputs to see
     // if any of them are preview
