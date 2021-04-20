@@ -7,6 +7,9 @@ const char *PASSWORD = "PWD";
 // UDP SETTINGS
 const int udp_port = 52381;
 
+// TCP SERVER SETTINGS
+const int tcp_port = 9999;
+
 // RS232 Serial Settings
 const int txpin = 19;
 const int rxpin = 22;
