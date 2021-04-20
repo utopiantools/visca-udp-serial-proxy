@@ -14,13 +14,14 @@ use the LED as a tally light.
 */
 
 // uncomment this line if you are using an M5Atom Matrix
-// #define MATRIX
+#define MATRIX
 
 // copy settings.h.dist to settings.h and then modify settings.h
 #include "settings.h"
 
 // STATE VARIABLES
 bool wifi_connected = false;
+bool ignore_button = false;
 
 IPAddress ip;
 WiFiClient tcp;
@@ -201,15 +202,27 @@ void status()
 
 void led(CRGB c)
 {
+#ifdef MATRIX
+  for (int i = 0; i < 25; i++)
+  {
+    M5.dis.drawpix(i, c);
+    // Serial.print(i);
+  }
+  M5.dis.setBrightness(8);
+#else
   M5.dis.drawpix(0, c);
+#endif
   ledcolor = c;
 }
 
 void start_server()
 {
+  Serial.print("Starting UDP server on port: ");
+  Serial.println(udp_port);
   udp.close(); // will close only if needed
   if (udp.listen(udp_port))
   {
+    Serial.println("Server is Running!");
     udp.onPacket([](AsyncUDPPacket packet) {
       CRGB oldc = ledcolor;
       led(yellow);
@@ -239,6 +252,10 @@ void start_server()
       led(oldc);
     });
   }
+  else
+  {
+    Serial.println("Server failed to start");
+  }
 }
 
 int read_tally(int input) { return (tb[8 + input]) - 48; }
@@ -264,6 +281,7 @@ void update_tally()
 
 void start_tally()
 {
+  Serial.println("Starting Tally Listener");
   tcp.connect(VMIX_IP, VMIX_PORT);
   tcp.write("SUBSCRIBE TALLY\r\n");
 }
@@ -272,9 +290,11 @@ void WiFiGotIP(WiFiEvent_t event, WiFiEventInfo_t info)
 {
   led(green);
   ip = info.got_ip.ip_info.ip.addr;
+  Serial.println("WiFi Connected!");
+  Serial.println(ip);
   wifi_connected = true;
-  start_tally();
   start_server(); // will stop any previous servers
+  // start_tally();
 }
 
 void WiFiDisconnected(WiFiEvent_t event, WiFiEventInfo_t info)
@@ -312,6 +332,7 @@ void check_tally()
   if (avail == 0)
     return;
 
+  Serial.println("TCP data in buffer!");
   // TALLY DATA ALWAYS LOOKS LIKE THIS:
   // TALLY OK 120001\r\n
   // (encoded as ASCII)
@@ -343,10 +364,11 @@ void check_tally()
 // put your setup code here, to run once:
 void setup()
 {
-  M5.begin(true, false, true);
+  M5.begin(true, true, true);
+  Serial.begin(baudrate);
+
   led(yellow);
 
-  Serial.begin(baudrate);
   Serial.println("started...");
   Serial.println("connecting to WiFi...");
 
@@ -373,9 +395,9 @@ void loop()
     Serial.println(tally_input);
     update_tally();
   }
-  else if (M5.Btn.pressedFor(750))
+  else if (M5.Btn.pressedFor(750) && !ignore_button)
   {
-    start_tally();
+    ignore_button = true;
     Serial.println("long press button!");
     // find the next active tally by cycling through all the inputs to see
     // if any of them are preview
@@ -388,6 +410,11 @@ void loop()
     Serial.print("WATCHING INPUT: ");
     Serial.println(tally_input);
     update_tally();
+    start_tally();
+  }
+  else if (M5.Btn.wasReleased())
+  {
+    ignore_button = false;
   }
 
   // blink if no wifi connection
@@ -403,10 +430,8 @@ void loop()
   check_serial();
   check_tally();
 
-  // check if we have received data over the tally tcp port
-  // later...
-
   // don't overload the CPU! take a breather
-  delay(20);
+  delay(100);
+  Serial.print('.');
   M5.update(); // reads the button again among other things.
 }
