@@ -204,6 +204,8 @@ void handle_packet(AsyncUDPPacket packet)
   led(oldc);
 }
 
+void get_visca_status(int type) {}
+
 ///
 ///
 /// UDP SERVER
