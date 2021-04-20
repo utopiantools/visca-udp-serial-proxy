@@ -190,12 +190,14 @@ double easeOutCube(int x) { return 1 - pow(1 - x, 3); }
 double easeOutCirc(int x) { return sqrt(1 - pow(x - 1, 2)); }
 double ease(int x)
 {
+  if (CURVE == "CIRC")
+    return easeOutCirc(x);
   if (CURVE == "QUAD")
     return easeOutQuad(x);
   if (CURVE == "CUBE")
     return easeOutCube(x);
-  if (CURVE == "CIRC")
-    return easeOutCirc(x);
+  if (CURVE == "NONE")
+    return x;
   // default
   return easeOutCirc(x);
 }
@@ -441,13 +443,13 @@ void handle_incoming_tcp()
     }
     else if (var == "CURVE")
     {
-      if (val == "QUAD" || val == "CUBE" || val == "CIRC")
+      if (val == "NONE" || val == "QUAD" || val == "CUBE" || val == "CIRC")
       {
         CURVE = val;
       }
       else
       {
-        remote.print("UNKNOWN CURVE: " + val + ". (MUST BE QUAD, CUBE, OR CIRC)\r\n");
+        remote.print("UNKNOWN CURVE: " + val + ". (MUST BE NONE, QUAD, CUBE, OR CIRC)\r\n");
         return;
       }
     }
@@ -493,7 +495,7 @@ void check_server_tcp()
       remote.write("VISCA PROXY TCP CONTROL... HERE ARE YOUR INSTRUCTIONS:\r\n---------------------------------------------");
       remote.write("\r\nENTER A COMMAND LIKE THIS: VARIABLE=VALUE\\r\\n\r\n");
       remote.write("FLOAT VARIABLES: ZOOMMULT, ZOOMEXP, PTZMULT, PTZEXP\r\n");
-      remote.write("STRING VARIABLE: CURVE (QUAD, CUBE, CIRC)\r\n");
+      remote.write("STRING VARIABLE: CURVE (NONE, QUAD, CUBE, CIRC) slows movements depending on zoom level\r\n");
       remote.write("COMMAND: STATUS=1 (RETURNS STATUS DATA)\r\n");
       remote.write("COMMAND: POWER=(0,1) (TURNS THE CAMERA ON OR OFF)\r\n");
       check_remote_incoming_tcp();
