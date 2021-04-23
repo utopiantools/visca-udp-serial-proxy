@@ -22,6 +22,7 @@ use the LED as a tally light.
 #include "settings.h"
 
 // STATE VARIABLES
+int lasttime = 0;
 bool wifi_connected = false;
 bool handling_long_press = false;
 CAMSTATS cam_stats;
@@ -103,25 +104,6 @@ void debug(uint8_t *buf, int len)
     debug(elem, HEX);
   }
 }
-void debug(AsyncUDPPacket packet)
-{
-  Serial.print("Type of UDP datagram: ");
-  Serial.print(packet.isBroadcast() ? "Broadcast" : packet.isMulticast() ? "Multicast"
-                                                                         : "Unicast");
-  Serial.print(", Sender: ");
-  Serial.print(packet.remoteIP());
-  Serial.print(":");
-  Serial.print(packet.remotePort());
-  Serial.print(", Receiver: ");
-  Serial.print(packet.localIP());
-  Serial.print(":");
-  Serial.print(packet.localPort());
-  Serial.print(", Message length: ");
-  Serial.print(packet.length());
-  Serial.print(", Payload (hex):");
-  debug(packet.data(), packet.length());
-  debug();
-}
 void status()
 {
   if (wifi_connected)
@@ -190,14 +172,17 @@ double easeOutCube(int x) { return 1 - pow(1 - x, 3); }
 double easeOutCirc(int x) { return sqrt(1 - pow(x - 1, 2)); }
 double ease(int x)
 {
+  x = 1 - x;
   if (CURVE == "CIRC")
     return easeOutCirc(x);
   if (CURVE == "QUAD")
     return easeOutQuad(x);
   if (CURVE == "CUBE")
     return easeOutCube(x);
-  if (CURVE == "NONE")
+  if (CURVE == "LINE")
     return x;
+  if (CURVE == "NONE")
+    return 0;
   // default
   return easeOutCirc(x);
 }
@@ -218,20 +203,27 @@ void handle_udp_visca(uint8_t *buf, size_t len)
   // is this a PTZ?
   if (modified[1] == 0x01 && modified[2] == 0x06 && modified[3] == 0x01)
   {
+    int new_pspeed = ptzcurve(modified[4]);
+    int new_tspeed = ptzcurve(modified[5]);
+    modified[4] = new_pspeed;
+    modified[5] = new_tspeed;
     Serial.println("PTZ CONTROL DETECTED... ADJUSTING SPEED");
-    modified[4] = (int)ptzcurve(modified[4]);
-    modified[5] = (int)ptzcurve(modified[5]);
+    Serial.println("P: " + String(new_pspeed, HEX));
+    Serial.println("T: " + String(new_tspeed, HEX));
   }
   if (modified[1] == 0x01 && modified[2] == 0x04 && modified[3] == 0x07)
   {
-    Serial.println("ZOOM CONTROL DETECTED, ADJUSTING SPEED");
     int zoomspeed = modified[4] & 0b00001111;
     zoomspeed = (int)zoomcurve(zoomspeed);
     int zoomval = (modified[4] & 0b11110000) + zoomspeed;
     modified[4] = zoomval;
+    Serial.println("ZOOM CONTROL DETECTED, ADJUSTING SPEED");
+    Serial.println("Z: " + String(zoomspeed, HEX));
   }
 
-  viscaPort.write(modified, lastelement + 1);
+  debug(modified, lastelement + 1);
+  // viscaPort.write(modified, lastelement + 1);
+  visca_send(modified);
 }
 void handle_serial_visca(uint8_t *buf, size_t len){};
 
@@ -265,19 +257,6 @@ void check_visca_serial()
   }
 }
 
-void handle_packet(AsyncUDPPacket packet)
-{
-  CRGB oldc = ledcolor;
-  led(yellow);
-
-  lastclientip = packet.remoteIP();
-  lastclientport = packet.remotePort();
-  debug(packet);
-
-  handle_udp_visca(packet.data(), packet.length());
-  led(oldc);
-}
-
 void get_visca_status(int type) {}
 
 ///
@@ -292,7 +271,50 @@ void start_server()
   {
     Serial.println("Server is Running!");
     udp.onPacket([](AsyncUDPPacket packet) {
-      handle_packet(packet);
+      // don't pass the packet around... deal with it here and now only
+      Serial.println("Received Packet");
+      CRGB oldc = ledcolor;
+      led(yellow);
+
+      lastclientip = packet.remoteIP();
+      lastclientport = packet.remotePort();
+
+      Serial.print("Type of UDP datagram: ");
+      Serial.print(packet.isBroadcast() ? "Broadcast" : packet.isMulticast() ? "Multicast"
+                                                                             : "Unicast");
+      Serial.print(", Sender: ");
+      Serial.print(packet.remoteIP());
+      Serial.print(":");
+      Serial.print(packet.remotePort());
+      Serial.print(", Receiver: ");
+      Serial.print(packet.localIP());
+      Serial.print(":");
+      Serial.print(packet.localPort());
+      Serial.print(", Message length: ");
+      Serial.print(packet.length());
+      Serial.print(", Payload (hex):");
+      debug(packet.data(), packet.length());
+      debug();
+
+      // might have multiple packets ??
+      while (packet.available())
+      {
+        int counter = 0;
+        uint8_t elem;
+        do
+        {
+          elem = packet.read();
+          lastudp_in[counter++] = elem;
+          if (counter > 15 || elem == 0xff)
+          {
+            handle_udp_visca(lastudp_in, counter);
+            counter = 0;
+            break;
+          }
+        } while (packet.available());
+      }
+      led(oldc);
+      Serial.println("Packet Handled");
     });
   }
   else
@@ -386,7 +408,7 @@ void check_tally_tcp()
 /// TCP SERVER HANDLER FOR UPDATING SETTINGS ON THE FLY
 /// commands recognized are of the form VARIABLENAME=value\r\n
 /// variables recognized are ZOOMMULT, ZOOMEXP, PTZMULT, PTZEXP
-/// also variable can be CURVE and the values can be QUAD, CUBE, CIRC
+/// also variable can be CURVE and the values can be QUAD, CUBE, CIRC, LINE, NONE
 void handle_incoming_tcp()
 {
   String received = acc;
@@ -443,13 +465,13 @@ void handle_incoming_tcp()
     }
     else if (var == "CURVE")
     {
-      if (val == "NONE" || val == "QUAD" || val == "CUBE" || val == "CIRC")
+      if (val == "NONE" || val == "LINE" || val == "QUAD" || val == "CUBE" || val == "CIRC")
       {
         CURVE = val;
       }
       else
       {
-        remote.print("UNKNOWN CURVE: " + val + ". (MUST BE NONE, QUAD, CUBE, OR CIRC)\r\n");
+        remote.print("UNKNOWN CURVE: " + val + ". (MUST BE NONE, LINE, QUAD, CUBE, OR CIRC)\r\n");
         return;
       }
     }
@@ -495,7 +517,7 @@ void check_server_tcp()
       remote.write("VISCA PROXY TCP CONTROL... HERE ARE YOUR INSTRUCTIONS:\r\n---------------------------------------------");
       remote.write("\r\nENTER A COMMAND LIKE THIS: VARIABLE=VALUE\\r\\n\r\n");
       remote.write("FLOAT VARIABLES: ZOOMMULT, ZOOMEXP, PTZMULT, PTZEXP\r\n");
-      remote.write("STRING VARIABLE: CURVE (NONE, QUAD, CUBE, CIRC) slows movements depending on zoom level\r\n");
+      remote.write("STRING VARIABLE: CURVE (NONE, LINE, QUAD, CUBE, CIRC) slows movements depending on zoom level\r\n");
       remote.write("COMMAND: STATUS=1 (RETURNS STATUS DATA)\r\n");
       remote.write("COMMAND: POWER=(0,1) (TURNS THE CAMERA ON OR OFF)\r\n");
       check_remote_incoming_tcp();
@@ -552,6 +574,7 @@ void setup()
 int loopcounter = 0;
 void loop()
 {
+  int now = millis();
   // Serial.print('.');
 
   // blink if no wifi connection
@@ -609,17 +632,20 @@ void loop()
   check_tally_tcp();
   check_server_tcp();
 
-  // recheck the visca stats every 500 ms
-  loopcounter = (loopcounter + 1) % 50;
-  switch (loopcounter)
+  // recheck the visca stats every few loops
+  loopcounter = (loopcounter + 1) % 10;
+  if (loopcounter == 0)
   {
-  case 0:
-    cam_stats = visca_get_stats();
-    break;
+    cam_stats = visca_get_stats(0);
+  }
+  else if (loopcounter == 5)
+  {
+    cam_stats = visca_get_stats(1);
   }
 
   // don't overload the CPU! take a breather
-  delay(10);
+  delay(100);
 
   M5.update(); // reads the button again among other things.
+  lasttime = now;
 }
